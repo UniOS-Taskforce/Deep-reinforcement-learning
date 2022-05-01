@@ -2,6 +2,7 @@ import gridworld
 import numpy
 import random
 import typing
+import datetime
 from enum import IntEnum
 
 class SARSA_solver:
@@ -16,17 +17,15 @@ class SARSA_solver:
         self._epsilon = epsilon
         self._alpha = alpha
         self._gamma = gamma
-
-        pass
     
-    def _step(self, old_index, old_reward):
+    def _step(self):
         best_action = (None, self._init_val)
-        if random.random()< self._epsilon:
+        if random.random() < self._epsilon:
             best_action = random.choice(list(self.game.Action))
         else:
             for action in self.game.Action:
                 try:
-                    cur_action = (action, self._q_val[self._state[0], self._state[1], int(action)] )
+                    cur_action = (action, self._q_val[self._state[0], self._state[1], int(action)])
                     #print(str(type(cur_action[1])) + " vs " + str(type(best_action[1])))
                     if cur_action[1] > best_action[1]:
                         best_action = cur_action
@@ -39,12 +38,6 @@ class SARSA_solver:
             #print(best_action)
         new_state, reward, is_term = self.game.step(best_action)
         new_index = self._state[0], self._state[1], int(best_action)
-        try:
-            change = float(old_reward) + self._gamma * self._q_val[new_index] - self._q_val[old_index]
-        except KeyError:
-            self._q_val[new_index] = self._init_val
-            change = float(old_reward) + self._gamma * self._q_val[new_index] - self._q_val[old_index]
-        self._q_val[old_index] += self._alpha * change 
         self._state = new_state
         return is_term, new_index, reward
     
@@ -54,7 +47,8 @@ class SARSA_solver:
             val_str = ""
             for x in range(self.game.blocks.shape[1]):
                 if(self.game.blocks[x, y]):
-                    retStr += "X" * 6
+                    retStr += "█" * 6
+                    val_str += "░" * 6
                 else:
                     best_action = (None, numpy.NINF)
                     for action in self.game.Action:
@@ -68,46 +62,73 @@ class SARSA_solver:
 
                     val_str += "{:6s}".format("{:1.2f}".format(best_action[1]))
                     best_action = best_action[0]
-                    if(best_action == gridworld.Gridworld.Action.NORTH):
-                        retStr += "^".center(6, " ")
+                    if(y == self.game.term_pos[1] and x == self.game.term_pos[0]):
+                        retStr += "@@@".center(6, " ")
+                    elif(best_action == gridworld.Gridworld.Action.NORTH):
+                        retStr += "↑".center(6, " ")
                     elif(best_action == gridworld.Gridworld.Action.SOUTH):
-                        retStr += "_".center(6, " ")
+                        retStr += "↓".center(6, " ")
                     elif(best_action == gridworld.Gridworld.Action.EAST):
-                        retStr += ">".center(6, " ")
+                        retStr += "→".center(6, " ")
                     elif(best_action == gridworld.Gridworld.Action.WEST):
-                        retStr += "<".center(6, " ")
+                        retStr += "←".center(6, " ")
                     else:
-                        retStr +="{:6s}".format("")
-            retStr += "\n"
-            retStr += val_str + "\n"
+                        retStr += "{:6s}".format(" ")
+            retStr += "\n" + val_str + "\n"
         return retStr
 
     def solve(self):
-        old_index = (0,0,0)
-        self._q_val[old_index] = self._init_val
-        steps = []
-        for i in range(self.n):
-            self._state = self.game.reset()
-            steps.append(0)
-            #print(self.game)
-            finished = False
-            old_index = (0,0,0)
-            old_reward = 0.0
-            while(not finished):
-                finished, old_index, old_reward = self._step(old_index, old_reward)
-                #print(self.game)
-                steps[-1] += 1
-                pass
-
-            change = float(old_reward) + self._gamma * self._q_val[old_index] - self._q_val[old_index]
-            self._q_val[old_index] += self._alpha * change 
-            #print(steps[-1])
-        #print(steps)
-        
-
+        self._state = self.game.reset()
+        rewards = list()
+        q_indices = list()
+        finished, q_index, reward = self._step()
+        q_indices.append(q_index)
+        rewards.append(reward)
+        while not finished:
+            if(len(q_indices) >= self.n):
+                q_index = q_indices.pop(0)
+                # Calc return value for iteration
+                ret = 0
+                for i in range(len(rewards)):
+                    ret += self._gamma ** i * rewards[i]
+                try:
+                    ret += self._gamma ** self.n * self._q_val[q_index]
+                except KeyError:
+                    ret += self._gamma ** self.n * self._init_val
+                # Update Q
+                try:
+                    self._q_val[q_index] *= 1 - self._alpha
+                except KeyError:
+                    self._q_val[q_index] = self._init_val
+                    self._q_val[q_index] *= 1 - self._alpha
+                self._q_val[q_index] += self._alpha * ret
+                rewards.pop(0)
+            finished, q_index, reward = self._step()
+            q_indices.append(q_index)
+            rewards.append(reward)
+        for q_index in q_indices:
+            ret = 0
+            for i in range(len(rewards)):
+                ret += self._gamma ** i * rewards[i]
+            # Update Q
+            try:
+                self._q_val[q_index] *= 1 - self._alpha
+            except KeyError:
+                self._q_val[q_index] = self._init_val
+                self._q_val[q_index] *= 1 - self._alpha
+            self._q_val[q_index] += self._alpha * ret
+            
+            rewards.pop(0)
+        return
 
 if __name__ == "__main__":
-    game = gridworld.Gridworld((10, 10), (0, 0), (9, 9), 1, block_chance=0.1)
-    solver = SARSA_solver(game, n = 1000, epsilon=0.5, gamma=0.8)
-    solver.solve()
+    size = (10, 10)
+    game = gridworld.Gridworld(size, (0, 0), (random.randint(0, size[0] - 1), random.randint(0, size[1] - 1)), 10, block_chance = 0.4, max_negative_reward = 0, action_fail_chance = 0)
+    solver = SARSA_solver(game, n = 100, epsilon = 0.2, gamma = 0.8, alpha = 0.3, init_val= -0.2)
+    rep = 1000
+    for i in range(rep):
+        solver.solve()
+        print(f'{datetime.datetime.now().isoformat()}: {i+1}/{rep}...')
+
+    #print(solver.game)
     print(solver)
